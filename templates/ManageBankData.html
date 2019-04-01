@@ -258,11 +258,13 @@
             <!-- form start -->
 </br>
 
+
             <form action="{{ url_for('manageBankData') }}" method="post" class="form-horizontal" role="form" enctype="multipart/form-data"
-            {% if not(isFB_Connected == 'flase') %}
-                onsubmit="return confirm('Are you sure you want to update your old Business Rules connection?')"
+            {% if (FB_flag == 1) %}
+                onsubmit="return confirm('Are you sure you want to update your old Business Rules?')"
             {% endif %}>
                     {{ form.hidden_tag() }}
+
               <div class="box-body">
               <input type="radio" name="tab" value="igotnone" onclick="show1();" /> Upload Business Rules &ensp; &ensp; &ensp;
                   <input type="radio" name="tab" value="igottwo" onclick="show2();" /> Business Rules Sample
@@ -348,7 +350,7 @@
 
 
 
-                      <input name='file_br' type="file" accept="Br_User/*" />
+                      <input name='file_br' type="file" accept="Br_User/*" required />
                          <p class="help-block">file extention, .json</p>
                        {% if is_Br_submitted==1  %} <p class="help-block" style="color: red">please select a file </p> {% endif %}
                    {% if file_exttintion_json==1  %} <p class="help-block" style="color: red">file must be in json format </p> {% endif %}

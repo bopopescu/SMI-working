@@ -63,11 +63,6 @@ def BankConnection():
 
 
 
-
-
-
-
-
 def firebaseConnection():
     config = {
         "apiKey": "AIzaSyBdvcfSBiaMQjb0q9g04emiCFYksGMvJfo",

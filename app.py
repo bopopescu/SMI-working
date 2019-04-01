@@ -10,7 +10,6 @@ import os
 import configparser
 from flask import Markup
 from flask_paginate import Pagination, get_page_parameter
-from flask_sqlalchemy import SQLAlchemy
 import pyrebase
 import random
 import time
@@ -20,7 +19,7 @@ import pdfkit
 from flask_mail import Mail, Message
 from celery.result import AsyncResult
 import json
-
+from pprint import pprint
 
 
 
@@ -353,62 +352,65 @@ def manageBankData():
     form = manageBankDataForm()
     search_form = SearchForm()
     form3 = uploadForm()
-
     status, cur, db, engine = BankConnection()
-    isFB_Connected = 'false'
+    operands = ['==', 'not', 'or', 'in', 'and', '<', '>', '<=', '>=']
+
+    if status == 1:  # If upload BR and didn't set DB redirect to database setup
+        flash(Markup('To upload your rules you need to setup your database connection first, please click <a href="/DatabaseSetup" class="alert-link">here</a>'),
+              'danger')
+        return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3)
+
+    fb = firebase.database()
+    isFB_Connected = fb.child().get().val()
+
+    FB_flag = 0
+
+    if not (isFB_Connected is None):
+        FB_flag = 1
+    print('isFB_Connected', FB_flag)
+
     if form.bank_submit.data and form.validate_on_submit():
         ## check if there's prevoius BR and confirm to update it
 
-        print()
+        #print()
         target = os.path.join(APP_ROOT, 'br_file/')
-        print(target)
+        #print(target)
         if not os.path.isdir(target):
             os.mkdir(target)
 
         file = request.files.get('file_br')
-        print(file)
+        #print(file)
         filename = file.filename
-        print(filename)
+        #print(filename)
 
         if filename.split(".", 1)[1] != 'txt':
             flash('File extention should be txt', 'danger')
-            return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,isFB_Connected=isFB_Connected)
+            return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3)
 
         else:
             dest = "/".join([target, filename])
-            print(dest)
+            #print(dest)
             file.save(dest)
         try:
-            db = firebase.database()
-            isFB_Connected = db.child('Rule3').child('suspiciousTransaction').child('amount').get().val()
+
             # businessRules_file = businessRules_file.data
             sanction_list = open("Br_file/" + filename, "r")
             risk_countries = form.risk_countries.data
             exceed_avg_tran = form.exceed_avg_tran.data
             # type1 = form.type.data
             amount = form.amount.data
-            db.child('Rule1').child('highRiskCountries').set(risk_countries)
-            db.child('Rule2').child('exceedingAvgTransaction').set(exceed_avg_tran)
+            fb.child('Rule1').child('highRiskCountries').set(risk_countries)
+            fb.child('Rule2').child('exceedingAvgTransaction').set(exceed_avg_tran)
             # db.child('Rule3').child('suspiciousTransaction').child('Type').set(type1)
-            db.child('Rule3').child('suspiciousTransaction').child('amount').set(amount)
-            db.child('Rule4').child('blackList').set(sanction_list.read().splitlines())
+            fb.child('Rule3').child('suspiciousTransaction').child('amount').set(amount)
+            fb.child('Rule4').child('blackList').set(sanction_list.read().splitlines())
+
         except Exception as e:
             flash('Please connect to the Internet..', 'danger')
-            return render_template("databaseSetup.html", form=form, status=status)
+            print(e)
+            return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,FB_flag=FB_flag)
 
-        if status == 1:  # If upload BR and didn't set DB redirect to database setup
-            flash('Successfully uploaded your business rules..Setup your database connection to start the analysis',
-                  'success')
-            form = dbSetupForm()
-            return render_template("databaseSetup.html", form=form, status=status)
-
-        if status == 0:
-            task = Analysis.delay()
-            form2 = SearchForm()
-            flash('Successfully uploaded your business rules..', 'success')
-            return render_template('analysisView.html', JOBID=task.id, form2=form2)
-
-        return redirect((url_for('manageBankData', form=form, form2=search_form, form3=form3,isFB_Connected=isFB_Connected)))
+        return redirect((url_for('manageBankData', form=form, form2=search_form, form3=form3,FB_flag=FB_flag)))
 
 
 
@@ -429,7 +431,7 @@ def manageBankData():
         print(file1)
         if file1 is None:
             return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
-                                   isFB_Connected=isFB_Connected,
+                                   FB_flag=FB_flag,
                                    is_Br_submitted=1)
         filename = file1.filename
         print(filename)
@@ -437,15 +439,96 @@ def manageBankData():
         if filename.split(".", 1)[1] != 'json':
             file_exttintion_json = 1
             return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
-                                   isFB_Connected=isFB_Connected,
+                                   FB_flag=FB_flag,
                                    file_exttintion_json=file_exttintion_json)
 
         else:
             dest = "/".join([target, filename])
             print(dest)
             file1.save(dest)
+            cur.execute("SELECT * FROM Bank_DB.transaction LIMIT 1")
+            with open(dest) as f:
+                data = json.load(f)
 
-    return render_template("ManageBankData.html", form=form, form2=search_form, isFB_Connected=isFB_Connected , form3=form3)
+            pprint(data)
+            i = 1
+            ## 1- check file structure ##
+            if 'Rules' not in data:
+                print('ERROR...your file is not well structured... please follow the file format in the sample')
+                flash('ERROR...your file is not well structured... please follow the file format in the sample',
+                      'danger')
+                return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                       FB_flag=FB_flag)
+            try:
+                fb = firebase.database()
+                for each in data['Rules']:
+
+              ### 2-check Key words structure #####
+                    if 'Rule{}'.format(i) not in data['Rules']:
+                        print('ERROR in your file structure in Rule{} please follow the format'.format(i))
+                        flash('ERROR in your file structure in Rule{} please follow the format'.format(i),'danger')
+                        return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                               FB_flag=FB_flag)
+                     ### 3- check if all attriubtes in dataset ###
+                    if data['Rules']['Rule' + str(i)][0] not in cur.column_names:
+                        print('Rule{} attribute {} not found in the dataset'.format(i,data['Rules']['Rule{}'.format(i)][0]))
+                        flash('Rule{} attribute {} not found in the dataset'.format(i,data['Rules']['Rule{}'.format(i)][0]),'danger')
+                        return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                               FB_flag=FB_flag)
+                     ### 4- check if theres illegal operand ####
+
+                    if data['Rules']['Rule' + str(i)][1] not in operands:
+                        print('Illegal operand ({})in Rule{}'.format(data['Rules']['Rule{}'.format(i)][1], i))
+                        flash('Illegal operand ({})in Rule{}'.format(data['Rules']['Rule{}'.format(i)][1], i),'danger')
+                        return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,FB_flag=FB_flag)
+                    #### 5- If there's rule for sanction, check if names are uploaded and get the names ####
+                    if data['Rules']['Rule' + str(i)][2] == 'sanctionList':
+                        print('Rule for sanction list')
+                        if ('sanctionList' not in data):
+                            print('for Rule{} Please  upload the sanction list section to the file'.format(i))
+                            flash('for Rule{} Please  upload the sanction list section to the file'.format(i), 'danger')
+                            return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                                   FB_flag=FB_flag)
+                        else:
+                            print('Sanction list is uploaded:')
+                            if len(data['sanctionList']) == 0:
+                                print('Sanction List is empty please upload the names')
+                                flash('Sanction List is empty please upload the names', 'danger')
+                                return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                                       FB_flag=FB_flag)
+                            else:
+                                print(data['sanctionList'])
+                                fb.child('sanctionList').set(data['sanctionList'])
+                    #### 6- If there's rule for risk countries, check if countries are uploaded and get the countries ####
+                    if data['Rules']['Rule' + str(i)][2] == 'HighRiskCountries':
+                        print('Rule for Risk countries')
+                        if ('HighRiskCountries' not in data):
+                            print('for Rule{} Please  upload the HighRiskCountries list section to the file'.format(i))
+                            flash('for Rule{} Please  upload the HighRiskCountries list section to the file'.format(i), 'danger')
+                            return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                                   FB_flag=FB_flag)
+                        else:
+                            print('HighRiskCountries list is uploaded:')
+                            if len(data['HighRiskCountries']) == 0:
+                                print('HighRiskCountries is empty please upload the names')
+                                flash('HighRiskCountries is empty please upload the names','danger')
+                                return render_template("ManageBankData.html", form=form, form2=search_form, form3=form3,
+                                                       FB_flag=FB_flag)
+                            else:
+                                print(data['HighRiskCountries'])
+                                fb.child('HighRiskCountries').set(data['HighRiskCountries'])
+
+
+                    fb.child('Rules').child('Rule' + str(i)).set(data['Rules']['Rule' + str(i)])
+                    i=i+1
+
+
+            except Exception as e :
+                print(e)
+
+
+
+    return render_template("ManageBankData.html", form=form, form2=search_form, FB_flag=FB_flag , form3=form3)
 
 #cases page
 
@@ -634,15 +717,14 @@ def DatabaseSetup():
     if session.get('username') == None:
         return redirect(url_for('home'))
     form = dbSetupForm()
+    form3 = uploadForm()
     status, cur, db, engine = BankConnection()
     try:
-     db = firebase.database()
-     isFB_Connected = db.child('Rule3').child('suspiciousTransaction').child('amount').get().val()
+     fb = firebase.database() # if nothing is uploaded == None
+     isFB_Connected = fb.child().get().val()
     except Exception as e:
         flash('Please connect to the Internet..', 'danger')
         return render_template("databaseSetup.html", form=form, status=status)
-
-
 
 
     if form.validate_on_submit():
@@ -670,16 +752,11 @@ def DatabaseSetup():
             flash('Unable to connect please try again..', 'danger')
             return render_template("databaseSetup.html", form=form, status = status)
         else:
-            if isFB_Connected == 'false':
+            if isFB_Connected == None :
                 flash('Successfully connected to the database..Upload your business rules to start the analysis', 'success')
                 search_form = SearchForm()
                 form = manageBankDataForm()
-                return render_template("ManageBankData.html", form=form, form2=search_form)
-            else:
-                task = Analysis.delay()
-                form2 = SearchForm()
-                flash('Successfully connected to the database..', 'success')
-                return render_template('analysisView.html', JOBID=task.id, form2=form2)
+                return render_template("ManageBankData.html", form=form, form2=search_form, form3= form3)
 
                 # Check if bussinse rule is uploaded
             flash('Successfully connected to the database..', 'success')

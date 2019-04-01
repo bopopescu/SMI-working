@@ -48,7 +48,7 @@ class DecisionTree:
 
         ######## LOAD THE MODEL  ###########
 
-        loaded_model = pickle.load(open('SMI_MODEL.sav', 'rb'))
+        loaded_model = pickle.load(open('/Users/Noura/Desktop/SMI-working/SMI_MODEL2.sav', 'rb'))
         predict = loaded_model.predict(testX)
         testX['isFruad_result'] = predict
         testX['location'] = LOACTION
